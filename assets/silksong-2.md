@@ -1,0 +1,254 @@
+[![](/Content/images/codebus-white.svg)](/)
+
+# [Arty的奇妙空间](/arty/)
+
+用Easyx复刻经典2D游戏
+
+  * [管理](/console/posts)
+
+
+
+##  EasyX 复刻《SilkSong》 [![金牌收录](/content/images/gold.png)](?medal=3 "金牌收录")
+
+__2025-7-29 __[Arty](/arty/) [ __(0)](https://codebus.cn/arty/silksong-2#comment)
+
+# 项目简介
+
+这是一个用 EasyX 和 Windows API（GDI、DirectShow）复刻的一款官方还未发售的 2D 横板类银河恶魔城游戏——《丝之歌》，开发语言是 C++。人物素材对标《丝之歌》，而由于缺乏专业美术，部分场景素材用的还是《空洞骑士》。
+
+项目分为两个部分：Engine 和 Project。
+
+Engine（仅适用于开发简易 2D 游戏）部分有渲染系统、粒子系统、碰撞系统、物理模拟系统、媒体系统、动画系统、相机系统、键鼠交互系统、UI 系统、计时系统等等。整体设计理念有借鉴一些主流工业级引擎（如 UE、Unity）。Engine 部分与游戏具体内容无关。Project 部分则是开发者需要具体编写的有关游戏内容的部分。
+
+# 基本概念
+
+游戏程序有一个全局对象——游戏世界（World），游戏世界中有诸多容器来存储并组织一切各具代表意义的对象类（如所有游戏对象，所有可渲染物体，所有碰撞体，所有计时器等等等）。开发者可以定义多个场景关卡（Level），但一个世界同时只能运行一个 Level，开发者需要在 Level 中组织管理游戏对象（Actor），在 Actor 游戏对象身上管理各具功能的组件（ActorComponent）。
+
+每个 Level 有且仅有一个特殊的 Actor——Controller。它是玩家控制器，你可以派生此类并自定义键鼠交互映射规则（在重载的虚函数 SetupInputComponent 当中）。
+    
+    
+    void Player::SetupInputComponent(InputComponent* inputComponent)
+    {
+    	inputComponent->SetMapping("WalkLeft", EKeyCode::VK_A);
+    	// ......
+    ​
+    	inputComponent->BindAction("WalkLeft", EInputType::Holding, [this]()
+    	{
+    		// ......
+    	});
+    	// ......
+    }
+
+在每个 Level 中，你需要在构造函数中通过 SetDefaultController 函数指定该场景的默认 Controller，否则，程序将会给你自动指定一个毫无任何功能的原始 Controller。
+    
+    
+    MossGrottoLevel::MossGrottoLevel()
+    {
+    	SetDefaultController<Player>();
+    	// ......
+    }
+
+Character 则是更为特殊的 Controller，它是专门的横板 2D 跳跃游戏的玩家角色，此类中提供了一些已经实现好的角色交互和运动逻辑，开发者如若要制作 2D 横板跳跃游戏，派生它再合适不过了。
+
+开发者大多数时间都要自定义具体的 Actor 和 ActorComponent 来实现游戏业务逻辑，或是搭建 Level 场景，或是实现 UI 界面（UserInterface），而它们都属于 Object 类。每个 Object 类都有三种特殊函数——BeginPlay、Update、EndPlay。BeginPlay 用来定义一些游戏对象的开始逻辑（注意不是创建组件的初始化逻辑，创建组件最好在构造函数就进行），该函数会在构造函数执行后紧接着执行（但不是立刻，程序逻辑上并未紧挨，这两个执行节点之间还会处理一些其它逻辑，只是他们的执行间隔小于一个游戏循环帧而已）。Update 则会每一个游戏逻辑循环帧执行，此外它会被传入一个参数 deltaTime 来得知此次循环和上一个循环之间的时间间隔供开发者使用，以便于消除实时帧率的波动对部分游戏逻辑的影响（如运动学层面等等），总之开发者在该类函数中编写游戏业务逻辑再合适不过了。EndPlay 函数则适合编写一些对象销毁逻辑，比如游戏对象的亡语。注意，开发者禁止自定义析构函数，而是用 EndPlay 来代替，否则会出现一些冲突性的 bug。以上三个函数均需采用装饰者模式来重载，需要先执行父类虚函数再定义自己的逻辑，否则会丧失一些核心功能。
+    
+    
+    void Player::Update(float deltaTime)
+    {
+    	Character::Update(deltaTime);
+     	// 开发者自定义逻辑......
+    }
+
+Actor 是开发者大多数时间要去定义的类。开发者需要在构造函数中创建并绑定组件：
+    
+    
+    XXX::XXX()
+    {
+    	render = ConstructComponent<SpriteRenderer>();
+    	render->AttachTo(root);
+    	rigid = ConstructComponent<RigidBody>();
+    	// ......
+    }
+
+每个 Actor 有一个默认的 root 场景根组件（SceneComponent），它使得 Actor 具有了场景属性——即 Transform 类，该类包含了位置坐标（location）、旋转（rotation）以及缩放（scale）。我们通过 ConstructComponent 函数来创建组件，该函数会创建一个 ActorComponent 组件类并将其注册到 Actor 容器当中。如果组件是场景组件的派生类，则需通过 AttachTo 函数来绑定到指定组件上，该函数可以设置场景组件之间的父子关系，方便通过相对场景属性来计算最终的绝对场景属性（在世界的场景属性），一般最好绑定到 root 上。
+    
+    
+    void AttachTo(Actor* par, FAttachmentTransformRules rule = FAttachmentTransformRules::KeepRelativeTransform);
+    ​
+    template<typename T>
+    T* ConstructComponent();
+
+如果想要销毁某个 Actor 对象，可以直接调用 Destroy 函数：
+    
+    
+    void Destroy();
+
+该函数会将该 Actor 加入待销毁容器当中，在本次逻辑循环帧的某个时刻统一销毁。当然，Actor 的默认析构函数已经包含了对其身上注册的所有组件的销毁逻辑。
+
+在有关设置或者获取 Actor 的场景属性方面，我提供了一系列函数接口，相信大家看名字也能知道它的功能：
+    
+    
+    	/** 获取场景属性（相对父对象坐标系）**/
+    	const FVector2D& GetLocalPosition() const;
+    	float GetLocalRotation() const;
+    	const FVector2D& GetLocalScale() const;
+    	const FTransform& GetLocalTransform() const;
+    ​
+    	/** 获取场景属性（世界绝对坐标系）**/
+    	FVector2D GetWorldPosition()const;
+    	float GetWorldRotation()const;
+    	FVector2D GetWorldScale()const;
+    ​
+    	/** 设置场景属性（相对父对象坐标系，如若没有父对象则为世界绝对坐标系）**/
+    	void SetLocalPosition(const FVector2D& pos);
+    	void SetLocalRotation(float angle);
+    	void SetLocalScale(const FVector2D& scale);
+    	void SetPositionAndRotation(const FVector2D& pos, float angle);
+    	void SetLocalTransform(const FTransform& transform);
+    ​
+    	/** 增加场景属性偏移量 **/
+    	void AddPosition(FVector2D pos);
+    	void AddRotation(float rot);
+
+其中 GetWorldPosition、GetWorldRotation、GetWorldScale 这三个函数是通过递归来计算某个 Actor 的世界绝对场景属性的，例如：
+    
+    
+    float Actor::GetWorldRotation() const
+    {
+    	if (parent && transformRule.RotationRule == EAttachmentRule::KeepRelative)
+    	{
+    		return parent->GetWorldRotation() + GetLocalRotation();
+    	}
+    	else return GetLocalRotation();
+    }
+    ​
+    FVector2D Actor::GetWorldScale() const
+    {
+    	if (parent && transformRule.ScaleRule == EAttachmentRule::KeepRelative)
+    	{
+    		return parent->GetWorldScale() * GetLocalScale();
+    	}
+    	else return GetLocalScale();
+    }
+    FVector2D Actor::GetWorldPosition() const
+    {
+    	if (parent && transformRule.LocationRule == EAttachmentRule::KeepRelative)
+    	{
+    		return parent->GetWorldPosition() + FVector2D::RotateVector(parent->GetWorldRotation(), GetLocalPosition() * parent->GetWorldScale());
+    	}
+    	else return GetLocalPosition();
+    }
+
+GameplayStatics 是一个静态类，其中定义了一系列最常用的静态函数供开发者使用，如创建游戏对象 CreateObject，查找某类游戏对象 FindObjectOfClass，查找带有某个标签名的对象 FindObjectOfName 创建 UI 界面 CreateUI，跳转到新的关卡场景 OpenLevel 等等等。其中 CreateObject 大概是使用频率最频繁的函数之一了：
+    
+    
+    template<typename T>
+    static T* CreateObject(FVector2D pos = FVector2D::ZeroVector, float angle = 0, FVector2D scale = FVector2D::UnitVector);
+    
+    
+    GameplayStatics::CreateObject<MossFloor>({ 1390.f, 1245.f });
+
+ 
+
+Timer 是计时器，可以绑定目标函数回调，指定其执行间隔。同时，开发者也可以决定该函数回调是一次性还是永久，如果是永久，同样可以指定从绑定函数开始到其初次执行的时间间隔。绑定需要通过 Timer 类的 Bind 函数，该计时器将会被注册到世界计时器容器统一管理。
+    
+    
+    template<typename T>
+    void Bind(double delay, T* obj, void(T::* function)(), bool repeat = false, double firstDelay = -1.0)
+    ​
+    void Bind(double delay, std::function<void()>function, bool repeat = false, double firstDelay = -1.0);
+
+  
+使用示例如下：
+    
+    
+    MyTimer.Bind(3.f, [this]() {// ......}, true, 0.5f);
+
+  
+Engine 部分一共 10031 行代码，几乎涵盖了大多数轻量级 2D 游戏开发所需实现的功能（图像渲染、相机处理、图像处理、帧动画、音视频播放、物理模拟与碰撞检测、UI 界面、粒子特效、键鼠控制、计时器、事件系统、文件读写、场景切换管理等等）。由于篇幅问题，以上仅介绍了游戏开发者可能最常用的几种函数或是接触的类。其余各具功能的组件、UI 部件等等的功能和使用方法请参照具体代码注释。
+
+# 开发环境
+
+VS2022 + EasyX_20240601 
+
+# 素材来源
+
+大部分美术、音效皆来自[spriters](https://www.spriters-resource.com/search/?q=Hollow+Knight)或原版解包，小部分来自网上各种民间版《丝之歌》以及《空洞骑士》wiki 百科网站，其余皆为作者手绘，或是用 ps 精修。
+
+所有素材皆用作学习交流，严禁商用。
+
+# 游戏简介
+
+目前只还原了两种可相互切换的菜单场景、两个二代“苔藓洞穴”的场景、三个一代“泪水之城”的场景、一个一代“格林剧团”的场景、两种小怪以及两场经典 boss 战。但主角的几乎所有行为、技能均已还原。
+
+菜单“CHANGE THEME”可以在怀旧和最新场景间来回切换。怀旧场景会直接进入一代的“泪水之城”，而新版场景会进入二代“苔藓洞穴”。在“苔藓洞穴”死后会复活在“泪水之城”。
+
+游戏中 WASD 控制上下左右，按住 Space 空格疾跑，J 攻击，K 跳跃（按住时间越久跳得越高，跳跃到平台边沿会自动攀爬），F 冲刺（地面小冲刺，空中大冲刺），L 闪避，Q 飞镖（飞镖可互动，向下攻击用作垫脚石），E 治疗，I 近战技能，地面使用 O 为远程技
+
+能，空中使用 O 发射钩锁斜向上移动，U 快速突刺技能。特别的，长按 W/S 向上/下看，W+J 向上攻击，S+J 斜向下攻击，座位旁按 W 坐下，坐下以后按 S 起立，按下 X 消耗灵魂可触发一次短时间格挡，格挡成功会有回报和反击。
+
+# 游戏执行效果
+
+![](http://i1.hdslb.com/bfs/archive/d1b969eb1005b00bc7d2b40543cbed4884fa2084.jpg)__
+
+# 项目地址
+
+[github](https://github.com/BitingStorm/SilkSong)
+
+[gitee](https://gitee.com/Arty5669/SilkSong)
+
+[2D](/t/2D)[C++](/t/C%2B%2B)[EasyX_2023大暑版](/t/EasyX_2023%E5%A4%A7%E6%9A%91%E7%89%88)[HollowKnight](/t/HollowKnight)[SilkSong](/t/SilkSong)[UI](/t/UI)[场景变换](/t/%E5%9C%BA%E6%99%AF%E5%8F%98%E6%8D%A2)[动画系统](/t/%E5%8A%A8%E7%94%BB%E7%B3%BB%E7%BB%9F)[刚体](/t/%E5%88%9A%E4%BD%93)[横板](/t/%E6%A8%AA%E6%9D%BF)[计时器](/t/%E8%AE%A1%E6%97%B6%E5%99%A8)[键鼠交互](/t/%E9%94%AE%E9%BC%A0%E4%BA%A4%E4%BA%92)[类银河恶魔城](/t/%E7%B1%BB%E9%93%B6%E6%B2%B3%E6%81%B6%E9%AD%94%E5%9F%8E)[粒子系统](/t/%E7%B2%92%E5%AD%90%E7%B3%BB%E7%BB%9F)[碰撞检测](/t/%E7%A2%B0%E6%92%9E%E6%A3%80%E6%B5%8B)[事件回调](/t/%E4%BA%8B%E4%BB%B6%E5%9B%9E%E8%B0%83)[视频播放](/t/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE)[图像处理](/t/%E5%9B%BE%E5%83%8F%E5%A4%84%E7%90%86)[物理模拟](/t/%E7%89%A9%E7%90%86%E6%A8%A1%E6%8B%9F)[相机系统](/t/%E7%9B%B8%E6%9C%BA%E7%B3%BB%E7%BB%9F)[渲染](/t/%E6%B8%B2%E6%9F%93)[音频播放](/t/%E9%9F%B3%E9%A2%91%E6%92%AD%E6%94%BE)[引擎](/t/%E5%BC%95%E6%93%8E)[游戏开发](/t/%E6%B8%B8%E6%88%8F%E5%BC%80%E5%8F%91)
+
+![Saving the comment](/Content/images/blog/ajax-loader.gif)
+
+### 添加评论
+
+[](https://i.codebus.cn/account/login?&returnUrl=https://codebus.cn/arty/a/silksong-2\))
+
+[取消回复](javascript:void\(0\);)
+
+![Arty](//thirdqq.qlogo.cn/ek_qqapp/AQN9mhYUF6Qgo4oBRDTfHmDlNsunPyibgqE09WqvodicCuUqYiaM9gDt8hk14C1gq74UeMfEXib78mqlzicmjeyjKddLbNibPsrSgeKicLxOX0nnSRkqFh893CmULPJesrRxg/0)
+
+[Arty](/arty/)
+
+  * [__](/arty/ "主页")
+  * [__](https://i.codebus.cn/user/e86cbc54-8eb3-321c-532b-edb0ce07a4af "用户信息")
+  * [ __](tencent://QQInterLive/?Cmd=2&Uin=3693656746 "添加 QQ 好友.") [ __](mqqwpa://im/chat?chat_type=wpa&uin=3693656746&version=1&src_type=web&web_src=https://codebus.cn)
+  * [__](https://i.codebus.cn/friend/add?fid=e86cbc54-8eb3-321c-532b-edb0ce07a4af "添加好友")
+
+
+
+搜索
+
+#### 标签云
+
+  * [UI](/arty/t/UI)
+  * [2D](/arty/t/2D)
+  * [引擎](/arty/t/%E5%BC%95%E6%93%8E)
+  * [图像处理](/arty/t/%E5%9B%BE%E5%83%8F%E5%A4%84%E7%90%86)
+  * [动画系统](/arty/t/%E5%8A%A8%E7%94%BB%E7%B3%BB%E7%BB%9F)
+  * [横板](/arty/t/%E6%A8%AA%E6%9D%BF)
+  * [SilkSong](/arty/t/SilkSong)
+  * [游戏](/arty/t/%E6%B8%B8%E6%88%8F)
+  * [场景变换](/arty/t/%E5%9C%BA%E6%99%AF%E5%8F%98%E6%8D%A2)
+  * [粒子系统](/arty/t/%E7%B2%92%E5%AD%90%E7%B3%BB%E7%BB%9F)
+  * [HollowKnight](/arty/t/HollowKnight)
+  * [游戏开发](/arty/t/%E6%B8%B8%E6%88%8F%E5%BC%80%E5%8F%91)
+  * [碰撞检测](/arty/t/%E7%A2%B0%E6%92%9E%E6%A3%80%E6%B5%8B)
+  * [事件回调](/arty/t/%E4%BA%8B%E4%BB%B6%E5%9B%9E%E8%B0%83)
+  * [渲染](/arty/t/%E6%B8%B2%E6%9F%93)
+  * [物理模拟](/arty/t/%E7%89%A9%E7%90%86%E6%A8%A1%E6%8B%9F)
+  * [相机系统](/arty/t/%E7%9B%B8%E6%9C%BA%E7%B3%BB%E7%BB%9F)
+  * [C++](/arty/t/C%2B%2B)
+  * [刚体](/arty/t/%E5%88%9A%E4%BD%93)
+  * [EasyX_2023大暑版](/arty/t/EasyX_2023%E5%A4%A7%E6%9A%91%E7%89%88)
+
+
+
+广告
+
+Copyright © 2026 [意在](https://easyx.tech) 投诉举报：admin@easyx.cn
+
+![](https://cdn.easyx.cn/mpsbeian.png) [冀公网安备13010402003013](https://beian.mps.gov.cn/#/query/webSearch?code=13010402003013) [冀ICP备18009530号-3](http://beian.miit.gov.cn)
+
+链接已经复制到剪贴板，可以直接粘贴给需要分享的好友。 
